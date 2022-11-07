@@ -1,30 +1,57 @@
+import {service} from '@loopback/core';
 import {
   Count,
   CountSchema,
   Filter,
   FilterExcludingWhere,
   repository,
-  Where,
+  Where
 } from '@loopback/repository';
 import {
-  post,
-  param,
-  get,
-  getModelSchemaRef,
-  patch,
-  put,
-  del,
-  requestBody,
-  response,
+  del, get,
+  getModelSchemaRef, HttpErrors, param, patch, post, put, requestBody,
+  response
 } from '@loopback/rest';
-import {Usuario} from '../models';
+import {Credenciales, Usuario} from '../models';
 import {UsuarioRepository} from '../repositories';
+import {AutenticacionService} from '../services';
+const fetch = require('node-fetch');
+
 
 export class UsuarioController {
   constructor(
     @repository(UsuarioRepository)
-    public usuarioRepository : UsuarioRepository,
-  ) {}
+    public usuarioRepository: UsuarioRepository,
+    @service(AutenticacionService)
+    public servicioAutenticacion: AutenticacionService
+  ) { }
+
+  @post('/identificarUsuario', {
+    responses: {
+      '200': {
+        description: 'Identificacion de usuarios'
+      }
+    }
+  })
+  async identificarUsuario(
+    @requestBody() credenciales: Credenciales
+  ) {
+    let u = await this.servicioAutenticacion.identificarUsuario(credenciales.usuario, credenciales.contrasena);
+    if (u) {
+      let token = this.servicioAutenticacion.generarTokenJWT(u);
+      return {
+        datos: {
+          nombre: u.nombre,
+          correo: u.correo,
+          id: u.id
+        },
+        tk: token
+      }
+    } else {
+      throw new HttpErrors[401]('Datos inválidos');
+    }
+
+  }
 
   @post('/usuarios')
   @response(200, {
@@ -44,7 +71,23 @@ export class UsuarioController {
     })
     usuario: Omit<Usuario, 'id'>,
   ): Promise<Usuario> {
-    return this.usuarioRepository.create(usuario);
+
+    let clave = this.servicioAutenticacion.generarClave();
+    let claveCifrada = this.servicioAutenticacion.cifrarClave(clave);
+    usuario.contrasena = claveCifrada;
+    let u = await this.usuarioRepository.create(usuario);
+
+    // Notificar al usuario :
+    let destino = usuario.correo;
+    let asunto = 'Credenciales de acceso al sistema';
+    let contenido = `Hola ${usuario.nombre} ${usuario.apellido}, su usuario es ${usuario.correo} y la contraseña es ${clave}`;
+    /*
+        fetch(`${Llaves.urlServicioNotificaciones}/email?correo_destino=${destino}&asunto=${asunto}&contenido=${contenido}`).then((data: any) => {
+          console.log(data);
+        });
+    */
+    console.log(clave);
+    return u;
   }
 
   @get('/usuarios/count')
